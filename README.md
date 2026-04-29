@@ -1,5 +1,6 @@
 # maildrop-event-management
 
+
 ## Overview
 `maildrop-event-management` is a small AWS serverless learning project built to understand the architecture patterns used in larger event-driven systems. It uses a simple notes application as the business use case so the focus stays on infrastructure, messaging, and deployment flow rather than domain complexity.
 
