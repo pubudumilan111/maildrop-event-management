@@ -1,0 +1,156 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: maildrop-event-management phase 2
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 10
+    MemorySize: 256
+    Environment:
+      Variables:
+        DYNAMODB_TABLE: !Ref NotesTable
+
+Resources:
+  NotesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: notes
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+
+  NewNoteTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: maildrop-new-note
+      DisplayName: Maildrop New Note
+
+  CreateNoteDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: maildrop-create-note-dead
+      VisibilityTimeout: 30
+
+  CreateNoteQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: maildrop-create-note
+      VisibilityTimeout: 30
+      ReceiveMessageWaitTimeSeconds: 5
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt CreateNoteDeadLetterQueue.Arn
+        maxReceiveCount: 2
+
+  CreateNoteQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref CreateNoteQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowSnsToSend
+            Effect: Allow
+            Principal: '*'
+            Action: sqs:SendMessage
+            Resource: !GetAtt CreateNoteQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref NewNoteTopic
+
+  CreateNoteSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: sqs
+      Endpoint: !GetAtt CreateNoteQueue.Arn
+      TopicArn: !Ref NewNoteTopic
+
+  CreateNoteRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/create_note_request_api/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          NEW_NOTE_TOPIC_ARN: !Ref NewNoteTopic
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref NewNoteTopic
+      Events:
+        CreateNote:
+          Type: Api
+          Properties:
+            Path: /notes
+            Method: post
+
+  CreateNoteRecordFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/create_note_record/
+      Handler: app.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotesTable
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt CreateNoteQueue.Arn
+            BatchSize: 1
+            Enabled: true
+
+  GetNotesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/get_notes_api/
+      Handler: app.lambda_handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref NotesTable
+      Events:
+        GetNotes:
+          Type: Api
+          Properties:
+            Path: /notes
+            Method: get
+
+  GetNoteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/get_note_api/
+      Handler: app.lambda_handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref NotesTable
+      Events:
+        GetNote:
+          Type: Api
+          Properties:
+            Path: /notes/{id}
+            Method: get
+
+Outputs:
+  ApiUrl:
+    Description: Invoke URL for the notes API
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref NotesTable
+  NewNoteTopicArn:
+    Description: SNS topic for new notes
+    Value: !Ref NewNoteTopic
+  CreateNoteQueueName:
+    Description: SQS queue backing note creation
+    Value: !GetAtt CreateNoteQueue.QueueName

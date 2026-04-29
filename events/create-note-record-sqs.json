@@ -1,0 +1,7 @@
+{
+  "Records": [
+    {
+      "body": "{\"Type\":\"Notification\",\"Message\":\"{\\\"id\\\":\\\"demo123\\\",\\\"title\\\":\\\"Queued note\\\",\\\"body\\\":\\\"Created from an SQS-wrapped SNS message\\\",\\\"created\\\":1777600000,\\\"source\\\":\\\"api\\\",\\\"status\\\":\\\"queued\\\"}\"}"
+    }
+  ]
+}

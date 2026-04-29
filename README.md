@@ -1,33 +1,125 @@
 # maildrop-event-management
 
+Tiny learning project for understanding the first layers of the CalendarSnack deployment model.
 
-## Overview
-`maildrop-event-management` is a small AWS serverless learning project built to understand the architecture patterns used in larger event-driven systems. It uses a simple notes application as the business use case so the focus stays on infrastructure, messaging, and deployment flow rather than domain complexity.
-
-The project demonstrates how to:
-- expose REST APIs with Amazon API Gateway and AWS Lambda
-- store and retrieve data with Amazon DynamoDB
-- process asynchronous writes using Amazon SNS and Amazon SQS
-- define and deploy infrastructure with AWS SAM and CloudFormation
-
-This project is designed as a step-by-step learning path toward more advanced serverless platform patterns.
-
-## Current Features
-- `GET /notes`
-- `GET /notes/{id}`
-- `POST /notes`
-
-The `POST /notes` flow is asynchronous:
-1. API Gateway receives the request
-2. Lambda validates and publishes the payload to SNS
-3. SNS delivers the message to SQS
-4. A worker Lambda consumes the queue message
-5. The note is written to DynamoDB
-
-This mirrors the decoupled processing style used in production-grade serverless systems.
+## What phase 2 covers
+- AWS SAM template structure
+- API Gateway to Lambda routing
+- DynamoDB reads
+- Asynchronous writes with SNS + SQS + Lambda
+- Cloud deployment with `sam deploy`
 
 ## Architecture
+
 ```text
 GET  /notes        -> API Gateway -> Lambda -> DynamoDB
 GET  /notes/{id}   -> API Gateway -> Lambda -> DynamoDB
 POST /notes        -> API Gateway -> Lambda -> SNS -> SQS -> Lambda -> DynamoDB
+```
+
+## Project structure
+
+```text
+maildrop-event-management/
+  template.yaml
+  events/
+    create-note-api.json
+    create-note-record-sqs.json
+    get-note.json
+    list-notes.json
+  src/
+    create_note_request_api/
+      app.py
+    create_note_record/
+      app.py
+    get_notes_api/
+      app.py
+    get_note_api/
+      app.py
+  requirements.txt
+```
+
+## Build
+
+```bash
+sam build
+```
+
+## Local API run
+
+```bash
+sam local start-api
+```
+
+## Local read tests
+
+```bash
+curl http://127.0.0.1:3000/notes
+curl http://127.0.0.1:3000/notes/1
+```
+
+## POST note after deploy
+
+```bash
+curl -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"My async note","body":"Created through SNS and SQS"}' \
+  <API_URL>/notes
+```
+
+Expected response:
+- `202 Accepted`
+- note payload with generated `id`
+
+## Deploy
+
+```bash
+sam build
+sam deploy \
+  --stack-name maildrop-event-management \
+  --resolve-s3 \
+  --capabilities CAPABILITY_IAM
+```
+
+## Seed read-path test data
+
+```bash
+aws dynamodb put-item \
+  --table-name notes \
+  --item '{
+    "pk": {"S": "note#1"},
+    "sk": {"S": "note#1"},
+    "id": {"S": "1"},
+    "title": {"S": "First note"},
+    "body": {"S": "Hello from DynamoDB"},
+    "source": {"S": "seed"},
+    "status": {"S": "created"},
+    "created": {"N": "1777500000"}
+  }'
+
+aws dynamodb put-item \
+  --table-name notes \
+  --item '{
+    "pk": {"S": "note#2"},
+    "sk": {"S": "note#2"},
+    "id": {"S": "2"},
+    "title": {"S": "Second note"},
+    "body": {"S": "Another note"},
+    "source": {"S": "seed"},
+    "status": {"S": "created"},
+    "created": {"N": "1777500100"}
+  }'
+```
+
+## What to observe in phase 2
+- `POST /notes` does not write directly to DynamoDB
+- the API Lambda publishes to SNS
+- SNS fans out into SQS
+- the worker Lambda consumes the SQS message and writes the note
+- this mirrors the async style used in CalendarSnack
+
+## Next step ideas
+- add SES inbound email and S3-based processing
+- add a second repo for deployment orchestration
+- publish the app through SAR
+- wrap the full stack with Sceptre + Jinja + CloudFormation
